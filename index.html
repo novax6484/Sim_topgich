@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Sim topgich</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--tx:#f1f5f9;--mu:#94a3b8;--ok:#22c55e;--wa:#f59e0b;--bad:#ef4444}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom);max-width:480px;margin:auto}
+h1{font-size:20px;text-align:center;margin:16px 0 4px}
+.sub{text-align:center;color:var(--mu);font-size:13px;margin-bottom:14px}
+.card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:12px}
+#lvl{font-size:72px;font-weight:800;text-align:center;line-height:1}
+#st{text-align:center;font-size:17px;margin:6px 0 12px;font-weight:600}
+.bar{height:22px;background:#334155;border-radius:11px;overflow:hidden}
+#fill{height:100%;width:0;background:var(--ok);transition:width .12s,background .12s}
+.row{display:flex;gap:8px;margin-top:12px;font-size:13px;color:var(--mu)}
+.row div{flex:1;text-align:center}
+.row b{display:block;color:var(--tx);font-size:18px}
+button{width:100%;padding:15px;border:0;border-radius:12px;font-size:16px;font-weight:700;background:#3b82f6;color:#fff;margin-top:8px}
+button.s{background:#334155}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{font-size:13px;color:var(--mu);display:block;margin-top:12px}
+input[type=range]{width:100%}
+#msg{color:var(--wa);font-size:14px;text-align:center;min-height:20px}
+ol{margin:0;padding-left:20px;font-size:14px;line-height:1.6;color:var(--mu)}
+.warn{font-size:12px;color:var(--mu);text-align:center;margin:8px 0 20px}
+</style>
+</head>
+<body>
+<h1>⚡ Sim topgich</h1>
+<div class="sub">Devor ichidagi simni taxminan topadi</div>
+
+<div class="card">
+  <div id="lvl">0</div>
+  <div id="st">Boshlash tugmasini bosing</div>
+  <div class="bar"><div id="fill"></div></div>
+  <div class="row">
+    <div>Tebranish (tok)<b id="ac">0</b></div>
+    <div>Metall / maydon<b id="dc">0</b></div>
+    <div>Eng yuqori<b id="pk">0</b></div>
+  </div>
+</div>
+
+<div id="msg"></div>
+<button id="go">▶ Boshlash</button>
+<div class="g">
+  <button class="s" id="cal">Kalibrovka</button>
+  <button class="s" id="snd">🔊 Tovush: yoq</button>
+</div>
+<button class="s" id="rst">Eng yuqorini nolga tushirish</button>
+
+<div class="card" style="margin-top:12px">
+  <label style="margin-top:0">Sezgirlik: <span id="sv">5</span></label>
+  <input type="range" id="sens" min="1" max="10" value="5">
+</div>
+
+<div class="card">
+  <ol>
+    <li>Telefonni devordan uzoqroq tutib <b>Kalibrovka</b> bosing (1 soniya, qimirlatmang).</li>
+    <li>Telefonni devorga yaqin qo'yib, sekin yuqoridan pastga va yon tomonga suring.</li>
+    <li>Raqam eng baland bo'lgan chiziq — sim shu yerda ketgan bo'lishi mumkin.</li>
+    <li>Ishlashi uchun simda tok bo'lishi kerak (masalan, chiroq yoqilgan).</li>
+  </ol>
+</div>
+<div class="warn">Bu taxminiy asbob. Burg'ulashdan oldin ehtiyot chorasi sifatida foydalaning, aniq o'lchov o'rnini bosmaydi.</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const N=30;
+let sensor=null,win=[],base={ac:0,m:0},calib=null,peak=0,soundOn=true,actx,osc,gain,running=false;
+
+function msg(t){$('msg').textContent=t||''}
+
+function std(a){const m=a.reduce((s,v)=>s+v,0)/a.length;return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length)}
+
+function metrics(){
+  const ac=Math.hypot(std(win.map(r=>r.x)),std(win.map(r=>r.y)),std(win.map(r=>r.z)));
+  const m=win.reduce((s,r)=>s+r.m,0)/win.length;
+  return {ac,m};
+}
+
+function onRead(d){
+  const r={x:d.x,y:d.y,z:d.z};
+  r.m=Math.hypot(r.x,r.y,r.z);
+  win.push(r); if(win.length>N) win.shift();
+  if(win.length<N) return;
+  const {ac,m}=metrics();
+  if(calib){
+    calib.push({ac,m});
+    if(calib.length>=60){
+      base.ac=calib.reduce((s,v)=>s+v.ac,0)/calib.length;
+      base.m=calib.reduce((s,v)=>s+v.m,0)/calib.length;
+      calib=null; msg('Kalibrovka tayyor ✅'); setTimeout(()=>msg(''),1500);
+    } else return;
+  }
+  const k=+$('sens').value/5;
+  const sAc=Math.max(0,ac-base.ac), sDc=Math.abs(m-base.m);
+  const lvl=Math.min(100,Math.round((sAc*10+sDc*2)*k));
+  show(lvl,sAc,sDc);
+}
+
+function show(lvl,sAc,sDc){
+  peak=Math.max(peak,lvl);
+  $('lvl').textContent=lvl;
+  $('ac').textContent=Math.min(99,Math.round(sAc*10));
+  $('dc').textContent=Math.min(99,Math.round(sDc*2));
+  $('pk').textContent=peak;
+  const f=$('fill'); f.style.width=lvl+'%';
+  let t,c;
+  if(lvl<15){t='Signal yo\'q';c='var(--ok)'}
+  else if(lvl<40){t='Kuchsiz signal';c='var(--ok)'}
+  else if(lvl<70){t='Ehtimol sim bor';c='var(--wa)'}
+  else{t='Kuchli signal — sim yaqin!';c='var(--bad)'}
+  f.style.background=c; $('st').textContent=t;
+  if(gain){gain.gain.value=(soundOn&&lvl>=15)?0.15:0; osc.frequency.value=250+lvl*9}
+  if(lvl>=70&&navigator.vibrate) navigator.vibrate(40);
+}
+
+function startAudio(){
+  try{
+    actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+    osc=actx.createOscillator(); gain=actx.createGain(); gain.gain.value=0;
+    osc.connect(gain); gain.connect(actx.destination); osc.start();
+  }catch(e){}
+}
+
+const Mag=window.Capacitor&&Capacitor.registerPlugin?Capacitor.registerPlugin('MagSensor'):null;
+let lis=null;
+async function start(){
+  if(!Mag){msg('Bu ilova faqat APK ichida ishlaydi.');return}
+  try{
+    lis=await Mag.addListener('reading',onRead);
+    await Mag.start(); startAudio(); running=true;
+    $('go').textContent='■ To\'xtatish'; calibrate();
+  }catch(e){msg('Datchik xatosi: '+(e.message||e))}
+}
+function stop(){
+  try{Mag&&Mag.stop()}catch(e){}
+  try{lis&&lis.remove()}catch(e){}
+  try{osc&&osc.stop()}catch(e){}
+  osc=gain=null;running=false;win=[];$('go').textContent='▶ Boshlash';$('st').textContent='To\'xtatildi';
+}
+
+function calibrate(){ if(!running) return msg('Avval Boshlash tugmasini bosing'); calib=[]; msg('Kalibrovka... telefonni qimirlatmang'); }
+
+$('go').onclick=()=>running?stop():start();
+$('cal').onclick=calibrate;
+$('rst').onclick=()=>{peak=0;$('pk').textContent=0};
+$('snd').onclick=()=>{soundOn=!soundOn;$('snd').textContent='🔊 Tovush: '+(soundOn?'yoq':'o\'chiq')};
+$('sens').oninput=e=>$('sv').textContent=e.target.value;
+</script>
+</body>
+</html>
